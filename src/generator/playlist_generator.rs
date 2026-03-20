@@ -186,6 +186,18 @@ fn pick_playlist_songs(
     ranked.shuffle(&mut rng);
     ranked.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
+    if !ranked.is_empty() {
+        tracing::debug!(
+            "top 3 scored candidates for {:?}: [{}, {}, {}]",
+            kind,
+            ranked.get(0).map(|c| c.score).unwrap_or(0.0),
+            ranked.get(1).map(|c| c.score).unwrap_or(0.0),
+            ranked.get(2).map(|c| c.score).unwrap_or(0.0),
+        );
+    }
+
+    let mut skipped_by_reason = std::collections::HashMap::new();
+
     for item in ranked {
         if selected.len() >= playlist_size {
             break;
@@ -196,17 +208,24 @@ fn pick_playlist_songs(
 
         let global_repeats = *global_use_count.get(&item.song_id).unwrap_or(&0);
         if global_repeats >= 2 {
+            *skipped_by_reason.entry("global_repeat_limit").or_insert(0) += 1;
             continue;
         }
 
-        let same_artist_streak = recent_artists.iter().rev().take(2).all(|a| *a == item.artist_id);
-        if same_artist_streak {
-            continue;
+        // Only enforce artist streak if we have at least 2 recent artists
+        if recent_artists.len() >= 2 {
+            let last_two_same_artist = recent_artists.iter().rev().take(2)
+                .all(|a| *a == item.artist_id);
+            if last_two_same_artist {
+                *skipped_by_reason.entry("artist_streak").or_insert(0) += 1;
+                continue;
+            }
         }
 
         if let Some(genre) = item.genre.as_ref() {
             let count = *genre_counts.get(genre).unwrap_or(&0);
             if count > playlist_size / 3 {
+                *skipped_by_reason.entry("genre_limit").or_insert(0) += 1;
                 continue;
             }
             genre_counts.insert(genre.clone(), count + 1);
@@ -216,6 +235,10 @@ fn pick_playlist_songs(
         selected_set.insert(item.song_id);
         recent_artists.push(item.artist_id);
         *global_use_count.entry(item.song_id).or_insert(0) += 1;
+    }
+
+    for (reason, count) in skipped_by_reason {
+        tracing::debug!("playlist {:?}: {} songs skipped ({})", kind, count, reason);
     }
 
     selected
