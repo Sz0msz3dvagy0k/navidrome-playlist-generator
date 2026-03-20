@@ -8,16 +8,40 @@ pub async fn export_playlist(
     pool: &PgPool,
     playlist: &PlaylistDraft,
 ) -> Result<String> {
-    let subsonic_song_ids: Vec<String> = sqlx::query_scalar(
-        r#"
-        SELECT subsonic_id
-        FROM songs
-        WHERE id = ANY($1)
-        "#,
-    )
-    .bind(&playlist.song_ids)
-    .fetch_all(pool)
-    .await?;
+    tracing::info!(
+        "exporting playlist: {} with {} song uuids",
+        playlist.name,
+        playlist.song_ids.len()
+    );
+
+    let subsonic_song_ids: Vec<String> = if playlist.song_ids.is_empty() {
+        tracing::warn!("playlist has no songs, skipping export");
+        Vec::new()
+    } else {
+        sqlx::query_scalar(
+            r#"
+            SELECT subsonic_id
+            FROM songs
+            WHERE id = ANY($1::uuid[])
+            "#,
+        )
+        .bind(&playlist.song_ids)
+        .fetch_all(pool)
+        .await?
+    };
+
+    tracing::info!(
+        "resolved {} subsonic ids for playlist {}",
+        subsonic_song_ids.len(),
+        playlist.name
+    );
+
+    if subsonic_song_ids.is_empty() {
+        tracing::warn!(
+            "no songs found in catalog for playlist {}, will create empty playlist",
+            playlist.name
+        );
+    }
 
     if let Some(existing_id) = client.find_playlist_id_by_name(&playlist.name).await? {
         client.delete_playlist(&existing_id).await?;

@@ -16,13 +16,24 @@ pub async fn run_daily_job(
     lastfm: &LastfmClient,
     playlist_size: usize,
 ) -> Result<()> {
+    tracing::info!("starting daily job: ingestion → scoring → generation → export");
+
+    tracing::info!("ingesting subsonic metadata");
     ingest_subsonic_metadata(subsonic, pool).await?;
+
+    tracing::info!("ingesting lastfm stats");
     ingest_lastfm_stats(lastfm, pool).await?;
 
     let today = Utc::now().date_naive();
+    tracing::info!("generating playlists for {}", today);
     let playlists = generate_daily_playlists(pool, today, playlist_size).await?;
+
+    tracing::info!("exporting {} playlists to navidrome", playlists.len());
     for playlist in playlists {
-        export_playlist(subsonic, pool, &playlist).await?;
+        match export_playlist(subsonic, pool, &playlist).await {
+            Ok(id) => tracing::info!("exported playlist {} -> {}", playlist.name, id),
+            Err(e) => tracing::error!("failed to export playlist {}: {}", playlist.name, e),
+        }
     }
 
     Ok(())

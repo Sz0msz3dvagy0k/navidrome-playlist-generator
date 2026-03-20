@@ -135,38 +135,6 @@ impl SubsonicClient {
         Ok(payload)
     }
 
-    async fn get_json_params<T>(&self, endpoint: &str, params: &[(&str, String)]) -> Result<T>
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        let mut all_params: Vec<(&str, String)> = vec![
-            ("u", self.username.clone()),
-            ("p", self.password.clone()),
-            ("v", "1.16.1".to_string()),
-            ("c", "daily-playlist-generator".to_string()),
-            ("f", "json".to_string()),
-        ];
-        all_params.extend_from_slice(params);
-
-        let url = format!("{}/rest/{}.view", self.base_url.trim_end_matches('/'), endpoint);
-        let response = self
-            .http
-            .get(url)
-            .query(&all_params)
-            .send()
-            .await
-            .context("subsonic request failed")?
-            .error_for_status()
-            .context("subsonic error response")?;
-
-        let payload = response
-            .json::<T>()
-            .await
-            .context("invalid subsonic json payload")?;
-
-        Ok(payload)
-    }
-
     pub async fn ping(&self) -> Result<()> {
         let _: serde_json::Value = self.get_json("ping", &[]).await?;
         Ok(())
@@ -226,10 +194,35 @@ impl SubsonicClient {
     }
 
     pub async fn create_playlist(&self, name: &str, song_ids: &[String]) -> Result<String> {
-        let mut params = vec![("name", name.to_string())];
-        params.extend(song_ids.iter().map(|song_id| ("songId", song_id.clone())));
+        let mut url = format!(
+            "{}/rest/createPlaylist.view?u={}&p={}&v=1.16.1&c=daily-playlist-generator&f=json&name={}",
+            self.base_url.trim_end_matches('/'),
+            urlencoding::encode(&self.username),
+            urlencoding::encode(&self.password),
+            urlencoding::encode(name)
+        );
 
-        let payload: serde_json::Value = self.get_json_params("createPlaylist", &params).await?;
+        for song_id in song_ids {
+            url.push_str("&songId=");
+            url.push_str(&urlencoding::encode(song_id));
+        }
+
+        tracing::debug!("creating playlist with request: {}", url.replace(&self.password, "***"));
+
+        let response = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .context("subsonic request failed")?
+            .error_for_status()
+            .context("subsonic error response")?;
+
+        let payload: serde_json::Value = response
+            .json()
+            .await
+            .context("invalid subsonic json payload")?;
+
         let id = payload
             .get("subsonic-response")
             .and_then(|resp| resp.get("playlist"))

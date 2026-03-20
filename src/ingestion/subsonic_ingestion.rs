@@ -7,7 +7,9 @@ use crate::utils::text::normalize_text;
 
 pub async fn ingest_subsonic_metadata(client: &SubsonicClient, pool: &PgPool) -> Result<()> {
     let artists = client.get_artists().await?;
+    tracing::info!("fetched {} artists from subsonic", artists.len());
 
+    let mut song_count = 0;
     for artist in artists {
         let normalized_artist = normalize_text(&artist.name);
 
@@ -58,9 +60,12 @@ pub async fn ingest_subsonic_metadata(client: &SubsonicClient, pool: &PgPool) ->
                 .bind(song.duration)
                 .execute(pool)
                 .await?;
+
+                song_count += 1;
             }
         }
     }
 
+    tracing::info!("ingested {} total songs from subsonic", song_count);
     Ok(())
 }

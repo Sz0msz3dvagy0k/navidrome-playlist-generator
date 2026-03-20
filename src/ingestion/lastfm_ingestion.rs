@@ -38,6 +38,12 @@ pub async fn ingest_lastfm_stats(client: &LastfmClient, pool: &PgPool) -> Result
     let recent_tracks = client.get_recent_tracks(500).await?;
     let top_tracks = client.get_top_tracks("1month", 500).await?;
 
+    tracing::info!(
+        "fetched {} recent tracks and {} top tracks from lastfm",
+        recent_tracks.len(),
+        top_tracks.len()
+    );
+
     let songs: Vec<DbSongMatch> = sqlx::query_as(
         r#"
         SELECT s.id, a.normalized_name, s.normalized_title
@@ -48,20 +54,29 @@ pub async fn ingest_lastfm_stats(client: &LastfmClient, pool: &PgPool) -> Result
     .fetch_all(pool)
     .await?;
 
+    tracing::info!("loaded {} songs from catalog for lastfm matching", songs.len());
+
+    let mut matched_count = 0;
+    let mut play_history_added = 0;
+
     for track in recent_tracks.iter().chain(top_tracks.iter()) {
         if let Some(song) = best_song_match(track, &songs) {
+            matched_count += 1;
             if let Some(ts) = track.played_at_unix {
                 if let Some(played_at) = DateTime::<Utc>::from_timestamp(ts, 0) {
                     sqlx::query(
                         r#"
                         INSERT INTO play_history (song_id, source, played_at)
                         VALUES ($1, 'lastfm', $2)
+                        ON CONFLICT DO NOTHING
                         "#,
                     )
                     .bind(song.id)
                     .bind(played_at)
                     .execute(pool)
                     .await?;
+
+                    play_history_added += 1;
                 }
             }
 
@@ -82,6 +97,12 @@ pub async fn ingest_lastfm_stats(client: &LastfmClient, pool: &PgPool) -> Result
             }
         }
     }
+
+    tracing::info!(
+        "matched {} lastfm tracks to catalog, added {} play history entries",
+        matched_count,
+        play_history_added
+    );
 
     sqlx::query(
         r#"

@@ -66,6 +66,12 @@ pub async fn generate_daily_playlists(
     .fetch_all(pool)
     .await?;
 
+    tracing::info!(
+        "loaded {} candidate songs for daily generation (target size: {})",
+        base_candidates.len(),
+        playlist_size
+    );
+
     let mut global_use_count: HashMap<Uuid, usize> = HashMap::new();
 
     let mut playlists = Vec::new();
@@ -78,6 +84,11 @@ pub async fn generate_daily_playlists(
     ] {
         let mut ranked = rank_candidates_for_kind(&base_candidates, date, kind);
         let selected = pick_playlist_songs(&mut ranked, playlist_size, &mut global_use_count, date, kind);
+        tracing::info!(
+            "playlist {:?} selected {} songs",
+            kind,
+            selected.len()
+        );
         playlists.push(PlaylistDraft {
             date,
             kind,
