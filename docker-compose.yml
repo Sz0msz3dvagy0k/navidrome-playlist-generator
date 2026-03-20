@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: playlist-postgres
+    environment:
+      POSTGRES_DB: playlist
+      POSTGRES_USER: playlist
+      POSTGRES_PASSWORD: playlist
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  playlist-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: playlist-generator
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
