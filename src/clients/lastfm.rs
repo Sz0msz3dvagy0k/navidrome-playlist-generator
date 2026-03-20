@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct LastfmTrack {
@@ -33,19 +34,28 @@ struct LastfmRawTrack {
     name: String,
     #[serde(default)]
     playcount: Option<String>,
-    artist: LastfmArtist,
-    #[serde(rename = "date", default)]
+    artist: Value,
+    #[serde(default)]
     date: Option<LastfmDate>,
 }
 
-#[derive(Debug, Deserialize)]
-struct LastfmArtist {
-    #[serde(rename = "#text")]
-    text: String,
+impl LastfmRawTrack {
+    fn artist_name(&self) -> String {
+        match &self.artist {
+            Value::String(s) => s.clone(),
+            Value::Object(obj) => obj
+                .get("#text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown")
+                .to_string(),
+            _ => "Unknown".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct LastfmDate {
+    #[serde(default)]
     uts: String,
 }
 
@@ -114,10 +124,13 @@ impl LastfmClient {
                 v.tracks
                     .into_iter()
                     .map(|raw| LastfmTrack {
-                        artist: raw.artist.text,
+                        artist: raw.artist_name(),
                         title: raw.name,
                         play_count: 1,
-                        played_at_unix: raw.date.and_then(|d| d.uts.parse::<i64>().ok()),
+                        played_at_unix: raw
+                            .date
+                            .as_ref()
+                            .and_then(|d| d.uts.parse::<i64>().ok()),
                     })
                     .collect::<Vec<_>>()
             })
@@ -140,14 +153,17 @@ impl LastfmClient {
                 v.tracks
                     .into_iter()
                     .map(|raw| LastfmTrack {
-                        artist: raw.artist.text,
+                        artist: raw.artist_name(),
                         title: raw.name,
                         play_count: raw
                             .playcount
                             .as_deref()
                             .and_then(|c| c.parse::<i64>().ok())
                             .unwrap_or(0),
-                        played_at_unix: raw.date.and_then(|d| d.uts.parse::<i64>().ok()),
+                        played_at_unix: raw
+                            .date
+                            .as_ref()
+                            .and_then(|d| d.uts.parse::<i64>().ok()),
                     })
                     .collect::<Vec<_>>()
             })
