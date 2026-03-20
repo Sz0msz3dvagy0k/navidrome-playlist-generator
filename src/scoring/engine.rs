@@ -1,8 +1,25 @@
-pub fn base_score(play_count: i64, recent_7d: i64, days_since_last: i64, repetition_count: i64) -> f64 {
-    let popularity = ((play_count as f64) + 1.0).ln();
-    let recency_boost = ((recent_7d as f64) + 1.0).ln() * 0.8;
-    let freshness = 1.0 / ((days_since_last.max(1) as f64).sqrt());
-    let repetition_penalty = (repetition_count as f64) * 0.25;
+#[derive(Debug, Clone)]
+pub struct SongFeatures {
+    pub metadata_similarity: f64,
+    pub total_play_count: i64,
+    pub recent_7d_count: i64,
+    pub days_since_last_play: i64,
+    pub repetition_14d_count: i64,
+    pub deterministic_jitter: f64,
+}
 
-    (1.3 * popularity) + (1.0 * recency_boost) + (0.7 * freshness) - repetition_penalty
+pub fn calculate_score(features: &SongFeatures) -> f64 {
+    let metadata = features.metadata_similarity.clamp(0.0, 1.0);
+    let log_play_count = ((features.total_play_count as f64) + 1.0).ln();
+    let recency_boost = ((features.recent_7d_count as f64) + 1.0).ln();
+    let freshness_decay = 1.0 / ((features.days_since_last_play.max(1) as f64).sqrt());
+    let repetition_penalty = (features.repetition_14d_count as f64).powf(1.15);
+
+    // Deterministic weighted score with very small jitter to avoid tie lock-in.
+    (0.30 * metadata)
+        + (0.28 * log_play_count)
+        + (0.22 * recency_boost)
+        + (0.12 * freshness_decay)
+        - (0.08 * repetition_penalty)
+        + features.deterministic_jitter
 }
