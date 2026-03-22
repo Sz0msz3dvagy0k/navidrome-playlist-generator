@@ -15,8 +15,14 @@ pub struct PlaylistDraft {
     pub song_ids: Vec<Uuid>,
 }
 
-pub fn playlist_name(date: NaiveDate, kind: PlaylistKind) -> String {
-    format!("Daily Mix - {} - {}", date, kind.as_str())
+pub fn playlist_name(_date: NaiveDate, kind: PlaylistKind) -> String {
+    match kind {
+        PlaylistKind::Favorites => "Favorites mix".to_string(),
+        PlaylistKind::Rediscovery => "Rediscovery mix".to_string(),
+        PlaylistKind::Genre => "Genre mix".to_string(),
+        PlaylistKind::Artist => "Artist mix".to_string(),
+        PlaylistKind::SmartShuffle => "Smart shuffle mix".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

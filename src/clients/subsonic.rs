@@ -188,6 +188,55 @@ impl SubsonicClient {
         Ok(maybe_id)
     }
 
+    pub async fn find_playlist_ids_for_cleanup(
+        &self,
+        target_name: &str,
+        legacy_kind: &str,
+    ) -> Result<Vec<String>> {
+        let payload: serde_json::Value = self.get_json("getPlaylists", &[]).await?;
+        let playlist_node = payload
+            .get("subsonic-response")
+            .and_then(|resp| resp.get("playlists"))
+            .and_then(|playlists| playlists.get("playlist"));
+
+        let legacy_suffix = format!(" - {}", legacy_kind);
+        let mut ids = Vec::new();
+
+        match playlist_node {
+            Some(serde_json::Value::Array(arr)) => {
+                for item in arr {
+                    if let (Some(name), Some(id)) = (
+                        item.get("name").and_then(|v| v.as_str()),
+                        item.get("id").and_then(|v| v.as_str()),
+                    ) {
+                        let is_target = name == target_name;
+                        let is_legacy =
+                            name.starts_with("Daily Mix - ") && name.ends_with(&legacy_suffix);
+                        if is_target || is_legacy {
+                            ids.push(id.to_string());
+                        }
+                    }
+                }
+            }
+            Some(serde_json::Value::Object(obj)) => {
+                let name = obj.get("name").and_then(|v| v.as_str());
+                let id = obj.get("id").and_then(|v| v.as_str());
+                if let (Some(name), Some(id)) = (name, id) {
+                    let is_target = name == target_name;
+                    let is_legacy = name.starts_with("Daily Mix - ") && name.ends_with(&legacy_suffix);
+                    if is_target || is_legacy {
+                        ids.push(id.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
     pub async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
         let _: serde_json::Value = self.get_json("deletePlaylist", &[("id", playlist_id)]).await?;
         Ok(())

@@ -43,7 +43,10 @@ pub async fn export_playlist(
         );
     }
 
-    if let Some(existing_id) = client.find_playlist_id_by_name(&playlist.name).await? {
+    let existing_ids = client
+        .find_playlist_ids_for_cleanup(&playlist.name, playlist.kind.as_str())
+        .await?;
+    for existing_id in existing_ids {
         client.delete_playlist(&existing_id).await?;
     }
 
