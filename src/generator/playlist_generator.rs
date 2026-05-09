@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::models::PlaylistKind;
-use crate::scoring::engine::{calculate_score, SongFeatures};
+use crate::scoring::engine::{calculate_score_for_kind, SongFeatures};
 
 #[derive(Debug, Clone)]
 pub struct PlaylistDraft {
@@ -148,10 +148,14 @@ fn rank_candidates_for_kind(
                 song_id: song.id,
                 artist_id: song.artist_id,
                 genre: song.genre.clone(),
-                score: calculate_score(&features)
+                score: calculate_score_for_kind(kind, &features)
                     + match kind {
                         PlaylistKind::Favorites => song.total_play_count as f64 * 0.01,
-                        PlaylistKind::Rediscovery => song.days_since_last_play as f64 * 0.008,
+                        PlaylistKind::Rediscovery => {
+                            let stale_bonus = song.days_since_last_play.min(120) as f64 * 0.006;
+                            let very_recent_penalty = if song.days_since_last_play <= 3 { 0.25 } else { 0.0 };
+                            stale_bonus - very_recent_penalty
+                        }
                         PlaylistKind::Genre => {
                             if song.genre.is_some() {
                                 0.2
@@ -160,7 +164,9 @@ fn rank_candidates_for_kind(
                             }
                         }
                         PlaylistKind::Artist => song.recent_7d_count as f64 * 0.012,
-                        PlaylistKind::SmartShuffle => 0.0,
+                        PlaylistKind::SmartShuffle => {
+                            if song.genre.is_some() { 0.05 } else { 0.0 }
+                        }
                     },
             }
         })
@@ -204,7 +210,7 @@ fn pick_playlist_songs(
 
     let mut skipped_by_reason = std::collections::HashMap::new();
 
-    for item in ranked {
+    for item in ranked.iter() {
         if selected.len() >= playlist_size {
             break;
         }
@@ -247,5 +253,83 @@ fn pick_playlist_songs(
         tracing::debug!("playlist {:?}: {} songs skipped ({})", kind, count, reason);
     }
 
-    selected
+    reorder_for_smoother_transitions(&selected, ranked, kind)
+}
+
+fn reorder_for_smoother_transitions(
+    selected_ids: &[Uuid],
+    ranked: &[RankedCandidate],
+    kind: PlaylistKind,
+) -> Vec<Uuid> {
+    if selected_ids.len() <= 2 {
+        return selected_ids.to_vec();
+    }
+
+    let mut by_id: HashMap<Uuid, &RankedCandidate> = HashMap::new();
+    for candidate in ranked {
+        by_id.insert(candidate.song_id, candidate);
+    }
+
+    let mut remaining: Vec<Uuid> = selected_ids.to_vec();
+    remaining.sort_by(|a, b| {
+        let a_score = by_id.get(a).map(|s| s.score).unwrap_or(0.0);
+        let b_score = by_id.get(b).map(|s| s.score).unwrap_or(0.0);
+        b_score
+            .partial_cmp(&a_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let first = remaining.remove(0);
+    let mut ordered = vec![first];
+
+    while let Some(last) = ordered.last().copied() {
+        if remaining.is_empty() {
+            break;
+        }
+
+        let mut best_idx = 0usize;
+        let mut best_cost = f64::MAX;
+        for (idx, candidate_id) in remaining.iter().enumerate() {
+            let transition_cost = transition_cost(
+                by_id.get(&last).copied(),
+                by_id.get(candidate_id).copied(),
+                kind,
+            );
+            if transition_cost < best_cost {
+                best_cost = transition_cost;
+                best_idx = idx;
+            }
+        }
+
+        ordered.push(remaining.remove(best_idx));
+    }
+
+    ordered
+}
+
+fn transition_cost(
+    from: Option<&RankedCandidate>,
+    to: Option<&RankedCandidate>,
+    kind: PlaylistKind,
+) -> f64 {
+    match (from, to) {
+        (Some(from), Some(to)) => {
+            let mut cost = (from.score - to.score).abs();
+            let (genre_penalty, artist_penalty) = match kind {
+                PlaylistKind::Genre => (1.2, 0.25),
+                PlaylistKind::Artist => (0.55, 0.9),
+                PlaylistKind::Rediscovery => (0.7, 0.3),
+                PlaylistKind::Favorites => (0.65, 0.45),
+                PlaylistKind::SmartShuffle => (0.8, 0.4),
+            };
+            if from.genre != to.genre {
+                cost += genre_penalty;
+            }
+            if from.artist_id != to.artist_id {
+                cost += artist_penalty;
+            }
+            cost
+        }
+        _ => 10.0,
+    }
 }
