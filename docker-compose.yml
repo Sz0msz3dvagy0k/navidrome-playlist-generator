@@ -18,8 +18,17 @@ services:
     container_name: playlist-generator
     depends_on:
       - postgres
-    env_file:
-      - .env
+    environment:
+      APP_HOST: $(APP_HOST)
+      APP_PORT: $(APP_PORT)
+      DATABASE_URL: $(DATABASE_URL)
+      SUBSONIC_BASE_URL: $(SUBSONIC_BASE)
+      SUBSONIC_USERNAME: $(SUBSONIC_USERNAME)
+      SUBSONIC_PASSWORD: $(SUBSONIC_PASSWORD)
+      LASTFM_API_KEY: $(LASTFM_API_KEY)
+      LASTFM_USERNAME: $(LASTFM_USERNAME)
+      PLAYLIST_SIZE: $(PLAYLIST_SIZE)
+      RUST_LOG: $(RUST_LOG)
     ports:
       - "8080:8080"
 
