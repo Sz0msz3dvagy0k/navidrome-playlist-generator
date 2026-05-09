@@ -29,8 +29,6 @@ services:
       LASTFM_USERNAME: ${LASTFM_USERNAME}
       PLAYLIST_SIZE: ${PLAYLIST_SIZE}
       RUST_LOG: ${RUST_LOG}
-    ports:
-      - "8080:8080"
 
 volumes:
   postgres_data:
